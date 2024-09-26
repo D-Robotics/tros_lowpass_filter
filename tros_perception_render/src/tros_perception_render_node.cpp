@@ -87,7 +87,7 @@ int TrosPerceptionRenderNode::Render(
   if (mat.empty()) {
     RCLCPP_ERROR(rclcpp::get_logger("ImageUtils"), "Failed to decode image.");
     return -1;
-  }  
+  }
 
   RCLCPP_INFO(rclcpp::get_logger("ImageUtils"),
               "target size: %d",
@@ -213,6 +213,16 @@ int TrosPerceptionRenderNode::Render(
     }
   }
 
+  // 渲染时间戳
+  std::string timestamp_str = std::to_string(msg_img->header.stamp.sec) + std::string(".") +
+    std::to_string(msg_img->header.stamp.nanosec);
+  cv::putText(mat,
+              timestamp_str,
+              cv::Point2f(10, 30),
+              cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
+              1.0,
+              cv::Scalar(0, 255, 0),
+              2.0);  
   // std::string saving_path = "render_" + msg_perc->header.frame_id + "_" +
   //                           std::to_string(msg_perc->header.stamp.sec) + "_" +
   //                           std::to_string(msg_perc->header.stamp.nanosec) +
