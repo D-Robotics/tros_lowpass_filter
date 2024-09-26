@@ -15,6 +15,13 @@ TrosPerceptionRenderNode::TrosPerceptionRenderNode(const rclcpp::NodeOptions &op
     << "\n pub_render_topic_name [" << pub_render_topic_name_ << "]"
   );
 
+  system_status_thread_ = std::thread([this](){
+    while (rclcpp::ok()) {
+      GetSystemStatus();
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+  });
+
   render_img_publisher_ = this->create_publisher<sensor_msgs::msg::CompressedImage>(
     pub_render_topic_name_,
     rclcpp::QoS(10));
@@ -90,12 +97,12 @@ int TrosPerceptionRenderNode::Render(
   }
 
   RCLCPP_INFO(rclcpp::get_logger("ImageUtils"),
-              "target size: %d",
+              "target size: %ld",
               msg_perc->targets.size());
   for (size_t idx = 0; idx < msg_perc->targets.size(); idx++) {
     const auto &target = msg_perc->targets.at(idx);
     RCLCPP_INFO(rclcpp::get_logger("ImageUtils"),
-                "target type: %s, rois.size: %d",
+                "target type: %s, rois.size: %ld",
                 target.type.c_str(),
                 target.rois.size());
     auto &color = colors[idx % colors.size()];
@@ -130,12 +137,6 @@ int TrosPerceptionRenderNode::Render(
     }
 
     if (!target.rois.empty()) {
-      auto floatToString = [](float value) -> std::string {  
-        std::ostringstream oss;  
-        oss << std::fixed << std::setprecision(2) << value;  
-        return oss.str();  
-      };  
-
       int pt_x = target.rois.front().rect.x_offset;
       int pt_y = target.rois.front().rect.y_offset;
       int y_offset = 0;
@@ -160,7 +161,7 @@ int TrosPerceptionRenderNode::Render(
         // if (render_y < 0 ) render_y = 0;
         // if (render_y > mat.rows) render_y = mat.rows;
         cv::putText(mat,
-                    "xyz (" + floatToString(pose_attr.x) + ", " + floatToString(pose_attr.y) + ", " + floatToString(pose_attr.z) + ")",
+                    "xyz (" + tools_.FloatToString(pose_attr.x) + ", " + tools_.FloatToString(pose_attr.y) + ", " + tools_.FloatToString(pose_attr.z) + ")",
                     cv::Point2f(pt_x, pt_y + y_offset),
                     cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
                     1.0,
@@ -170,7 +171,7 @@ int TrosPerceptionRenderNode::Render(
       if (!std::isnan(pose_attr.width)) {
         y_offset += 30;
         cv::putText(mat,
-                    "width (" + floatToString(pose_attr.width) + ")",
+                    "width (" + tools_.FloatToString(pose_attr.width) + ")",
                     cv::Point2f(pt_x, pt_y + y_offset),
                     cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
                     1.0,
@@ -223,6 +224,19 @@ int TrosPerceptionRenderNode::Render(
               1.0,
               cv::Scalar(0, 255, 0),
               2.0);  
+
+  // 渲染系统信息
+  std::string system_status =
+    "CPU: " + tools_.FloatToString(system_status_->cpu_usage) + "%" +
+    ", Temp: " + system_status_->temperature;
+  cv::putText(mat,
+              system_status,
+              cv::Point2f(10, 70),
+              cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
+              1.0,
+              cv::Scalar(0, 255, 0),
+              2.0);  
+
   // std::string saving_path = "render_" + msg_perc->header.frame_id + "_" +
   //                           std::to_string(msg_perc->header.stamp.sec) + "_" +
   //                           std::to_string(msg_perc->header.stamp.nanosec) +
@@ -233,7 +247,17 @@ int TrosPerceptionRenderNode::Render(
   // cv::imwrite(saving_path, mat);
   return 0;
 }
-
+  
+void TrosPerceptionRenderNode::GetSystemStatus() {
+  float cpu_usage = tools_.GetCPUUsage(8);
+  std::string cpu_temperature = tools_.GetCPUTemperature();
+  RCLCPP_DEBUG_STREAM(this->get_logger(),
+  "CPU Usage: " << cpu_usage << "%"
+  ", temperature: " << cpu_temperature);  
+  
+  system_status_->cpu_usage = cpu_usage;
+  system_status_->temperature = cpu_temperature;
+}
 
 }
 

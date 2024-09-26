@@ -11,6 +11,7 @@
 #include "message_filters/sync_policies/exact_time.h"
 #include "ai_msgs/msg/perception_targets.hpp"
 #include "sensor_msgs/msg/compressed_image.hpp"
+#include "common.hpp"
 
 namespace tros {
 
@@ -49,6 +50,15 @@ struct PoseAttribute {
   float z = 0.0f / 0.0f;
 };
 
+// 系统状态
+struct SystemStatus {
+  // -1或者空 表示未获取到
+  float cpu_usage = -1;
+  float mem_usage = -1;
+  // 芯片温度
+  std::string temperature = "";
+};
+
 class TrosPerceptionRenderNode : public rclcpp::Node {
  public:
    TrosPerceptionRenderNode(const rclcpp::NodeOptions &options);
@@ -71,6 +81,12 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
 
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr render_img_publisher_ = nullptr;
 
+  // 查询系统状态的现成
+  std::thread system_status_thread_;
+  std::shared_ptr<SystemStatus> system_status_ = std::make_shared<SystemStatus>();
+
+  Tools tools_;
+
   void TopicSyncCallback(
   const ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg1,
   const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg2);
@@ -81,6 +97,9 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
     const ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg_perc,
     const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg_img,
     cv::Mat &mat);
+
+  // 获取系统状态
+  void GetSystemStatus();
 };
 
 }
