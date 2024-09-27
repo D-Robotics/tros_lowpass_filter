@@ -78,13 +78,22 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
   std::shared_ptr<message_filters::Synchronizer<GridMapCustomSyncPolicyType>>
     grid_map_synchronizer_ = nullptr;
 
-  std::string perception_topic_name_ = "tros_dnn_detection";
-  std::string img_topic_name_ = "tros_img";
+  using PercMapCustomSyncPolicyType = message_filters::sync_policies::ExactTime<
+    ai_msgs::msg::PerceptionTargets,
+    sensor_msgs::msg::CompressedImage,
+    nav_msgs::msg::OccupancyGrid,
+    nav_msgs::msg::OccupancyGrid>;
+  std::shared_ptr<message_filters::Synchronizer<PercMapCustomSyncPolicyType>>
+    perc_map_synchronizer_ = nullptr;
+
+  std::string perception_topic_name_ = "tros_perc_fusion";
+  std::string img_topic_name_ = "image_jpeg";
   std::string pub_render_topic_name_ = "tros_render_img";
    
   std::string sub_nav_grid_map_topic_name_ = "local_costmap/tros_grid_costmap";
   std::string sub_fusion_grid_map_topic_name_ = "tros_occgrid_seg";
   std::string pub_render_grid_map_topic_name_ = "tros_render_grid_map_img";
+  std::string pub_render_perc_map_topic_name_ = "tros_render_perc_map_img";
 
   message_filters::Subscriber<ai_msgs::msg::PerceptionTargets> sub_perc_;
   message_filters::Subscriber<sensor_msgs::msg::CompressedImage> sub_img_;
@@ -94,6 +103,7 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
 
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr render_img_publisher_ = nullptr;
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr render_grid_map_publisher_ = nullptr;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr render_perc_map_publisher_ = nullptr;
 
   // 查询系统状态的现成
   std::thread system_status_thread_;
@@ -108,6 +118,12 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
   void GridMapTopicSyncCallback(
     nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg1,
     nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg2);
+
+  void PercMapTopicSyncCallback(
+    ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg_perc,
+    sensor_msgs::msg::CompressedImage::ConstSharedPtr msg_img,
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_nav_grid_map,
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_fusion_grid_map);
 
   cv::Mat compressedImageToMat(const sensor_msgs::msg::CompressedImage::ConstSharedPtr img_ptr);
 

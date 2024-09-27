@@ -11,6 +11,7 @@ TrosPerceptionRenderNode::TrosPerceptionRenderNode(const rclcpp::NodeOptions &op
   sub_fusion_grid_map_topic_name_ = this->declare_parameter("sub_fusion_grid_map_topic_name", sub_fusion_grid_map_topic_name_);
   pub_render_topic_name_= this->declare_parameter("pub_render_topic_name", pub_render_topic_name_);
   pub_render_grid_map_topic_name_ = this->declare_parameter("pub_render_grid_map_topic_name", pub_render_grid_map_topic_name_);
+  pub_render_perc_map_topic_name_ = this->declare_parameter("pub_render_perc_map_topic_name", pub_render_perc_map_topic_name_);
 
   RCLCPP_WARN_STREAM(this->get_logger(),
     "\n perception_topic_name [" << perception_topic_name_ << "]"
@@ -19,6 +20,7 @@ TrosPerceptionRenderNode::TrosPerceptionRenderNode(const rclcpp::NodeOptions &op
     << "\n sub_fusion_grid_map_topic_name [" << sub_fusion_grid_map_topic_name_ << "]"
     << "\n pub_render_topic_name [" << pub_render_topic_name_ << "]"
     << "\n pub_render_grid_map_topic_name [" << pub_render_grid_map_topic_name_ << "]"
+    << "\n pub_render_perc_map_topic_name [" << pub_render_perc_map_topic_name_ << "]"
   );
 
   system_status_thread_ = std::thread([this](){
@@ -34,6 +36,9 @@ TrosPerceptionRenderNode::TrosPerceptionRenderNode(const rclcpp::NodeOptions &op
   render_grid_map_publisher_ = this->create_publisher<sensor_msgs::msg::CompressedImage>(
     pub_render_grid_map_topic_name_,
     rclcpp::QoS(10));
+  render_perc_map_publisher_ = this->create_publisher<sensor_msgs::msg::CompressedImage>(
+    pub_render_perc_map_topic_name_,
+    rclcpp::QoS(10));
 
   sub_perc_.subscribe(this, perception_topic_name_);
   sub_img_.subscribe(this, img_topic_name_);
@@ -48,11 +53,17 @@ TrosPerceptionRenderNode::TrosPerceptionRenderNode(const rclcpp::NodeOptions &op
     GridMapCustomSyncPolicyType(10), sub_nav_grid_map_, sub_fusion_grid_map_);
   grid_map_synchronizer_->registerCallback(std::bind(&TrosPerceptionRenderNode::GridMapTopicSyncCallback,
     this, std::placeholders::_1, std::placeholders::_2));
+
+  perc_map_synchronizer_ = std::make_shared<message_filters::Synchronizer<PercMapCustomSyncPolicyType>>(
+    PercMapCustomSyncPolicyType(10), sub_perc_, sub_img_, sub_nav_grid_map_, sub_fusion_grid_map_);
+  perc_map_synchronizer_->registerCallback(std::bind(&TrosPerceptionRenderNode::PercMapTopicSyncCallback,
+    this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
 }
 
 void TrosPerceptionRenderNode::PercTopicSyncCallback(
   const ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg_perc,
   const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg_img) {
+  RCLCPP_INFO(this->get_logger(), "PercTopicSync Callback");
   cv::Mat mat;
   Render(msg_perc, msg_img, mat);
 
@@ -68,6 +79,7 @@ void TrosPerceptionRenderNode::PercTopicSyncCallback(
 void TrosPerceptionRenderNode::GridMapTopicSyncCallback(
     nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_nav_grid_map,
     nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_fusion_grid_map) {
+  RCLCPP_INFO(this->get_logger(), "GridMapTopicSync Callback");
   if (!msg_nav_grid_map || !msg_fusion_grid_map || !render_grid_map_publisher_) {
     return;
   }
@@ -105,6 +117,56 @@ void TrosPerceptionRenderNode::GridMapTopicSyncCallback(
     render_grid_map_publisher_->publish(std::move(*msg));
   }
 }  
+
+void TrosPerceptionRenderNode::PercMapTopicSyncCallback(
+    ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg_perc,
+    sensor_msgs::msg::CompressedImage::ConstSharedPtr msg_img,
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_nav_grid_map,
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_fusion_grid_map) {
+    RCLCPP_INFO(this->get_logger(), "PercMapTopicSync Callback");
+  if (!msg_perc || !msg_img || !msg_nav_grid_map || !msg_fusion_grid_map || !render_perc_map_publisher_) {
+    return;
+  }
+
+  // 感知和图像渲染
+  cv::Mat mat_perc;
+  Render(msg_perc, msg_img, mat_perc);
+
+  // 两个map渲染
+  cv::Mat mat_nav, mat_fusion, mat_map;
+  if (RenderGridMap(msg_nav_grid_map, mat_nav, 90) == 0 &&
+    RenderGridMap(msg_fusion_grid_map, mat_fusion, 180) == 0) {
+    // 上下拼接
+    int h = mat_nav.rows + mat_fusion.rows;
+    int w = std::max(mat_nav.cols, mat_fusion.cols);
+    mat_map = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
+    RCLCPP_DEBUG(this->get_logger(), "RenderGridMap: w=%d, h=%d", w, h);
+    // 将源矩阵复制到目标矩阵  
+    mat_nav.copyTo(mat_map(cv::Rect(0, 0, mat_nav.cols, mat_nav.rows)));  
+    mat_fusion.copyTo(mat_map(cv::Rect(0, mat_nav.rows, mat_fusion.cols, mat_fusion.rows)));
+  }
+
+  // 水平拼接 mat_perc mat_map 两个图像
+  int h = std::max(mat_perc.rows, mat_map.rows);
+  int w = mat_perc.cols + mat_map.cols;
+  // 创建一个源矩阵  
+  cv::Mat src = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
+  RCLCPP_DEBUG(this->get_logger(), "RenderGridMap: w=%d, h=%d", w, h);
+  // 将源矩阵复制到目标矩阵  
+  mat_perc.copyTo(src(cv::Rect(0, 0, mat_perc.cols, mat_perc.rows)));  
+  mat_map.copyTo(src(cv::Rect(mat_perc.cols, 0,
+    mat_map.cols, mat_map.rows)));
+
+  std::vector<uchar> buf;  
+  cv::imencode(".jpeg", src, buf);
+  auto msg = std::make_shared<sensor_msgs::msg::CompressedImage>();  
+  msg->header = msg_nav_grid_map->header;
+  msg->format = "jpeg";  
+  msg->data.assign(buf.begin(), buf.end());
+  RCLCPP_INFO(this->get_logger(), "Publish perc map with topic: %s", pub_render_perc_map_topic_name_.data());
+  render_perc_map_publisher_->publish(std::move(*msg));
+}  
+
 
 cv::Mat TrosPerceptionRenderNode::compressedImageToMat(
   const sensor_msgs::msg::CompressedImage::ConstSharedPtr img_ptr) {  
