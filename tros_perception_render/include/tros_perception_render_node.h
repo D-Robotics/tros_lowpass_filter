@@ -11,6 +11,7 @@
 #include "message_filters/sync_policies/exact_time.h"
 #include "ai_msgs/msg/perception_targets.hpp"
 #include "sensor_msgs/msg/compressed_image.hpp"
+#include <nav_msgs/msg/occupancy_grid.hpp>
 #include "common.hpp"
 
 namespace tros {
@@ -65,21 +66,34 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
    ~TrosPerceptionRenderNode() = default;
 
  private:
-  rclcpp::TimerBase::SharedPtr timer_;
+  using PercCustomSyncPolicyType = message_filters::sync_policies::ExactTime<
+    ai_msgs::msg::PerceptionTargets,
+    sensor_msgs::msg::CompressedImage>;
+  std::shared_ptr<message_filters::Synchronizer<PercCustomSyncPolicyType>>
+    perc_synchronizer_ = nullptr;
 
-  using CustomSyncPolicyType = message_filters::sync_policies::ExactTime<ai_msgs::msg::PerceptionTargets,
-  sensor_msgs::msg::CompressedImage>;
-  using SynchronizerType = message_filters::Synchronizer<CustomSyncPolicyType>;
-  std::shared_ptr<SynchronizerType> synchronizer_;
+  using GridMapCustomSyncPolicyType = message_filters::sync_policies::ExactTime<
+    nav_msgs::msg::OccupancyGrid,
+    nav_msgs::msg::OccupancyGrid>;
+  std::shared_ptr<message_filters::Synchronizer<GridMapCustomSyncPolicyType>>
+    grid_map_synchronizer_ = nullptr;
 
   std::string perception_topic_name_ = "tros_dnn_detection";
   std::string img_topic_name_ = "tros_img";
   std::string pub_render_topic_name_ = "tros_render_img";
    
+  std::string sub_nav_grid_map_topic_name_ = "local_costmap/tros_grid_costmap";
+  std::string sub_fusion_grid_map_topic_name_ = "tros_occgrid_seg";
+  std::string pub_render_grid_map_topic_name_ = "tros_render_grid_map_img";
+
   message_filters::Subscriber<ai_msgs::msg::PerceptionTargets> sub_perc_;
   message_filters::Subscriber<sensor_msgs::msg::CompressedImage> sub_img_;
 
+  message_filters::Subscriber<nav_msgs::msg::OccupancyGrid> sub_nav_grid_map_;
+  message_filters::Subscriber<nav_msgs::msg::OccupancyGrid> sub_fusion_grid_map_;
+
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr render_img_publisher_ = nullptr;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr render_grid_map_publisher_ = nullptr;
 
   // 查询系统状态的现成
   std::thread system_status_thread_;
@@ -87,9 +101,13 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
 
   Tools tools_;
 
-  void TopicSyncCallback(
-  const ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg1,
-  const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg2);
+  void PercTopicSyncCallback(
+    const ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg1,
+    const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg2);
+
+  void GridMapTopicSyncCallback(
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg1,
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg2);
 
   cv::Mat compressedImageToMat(const sensor_msgs::msg::CompressedImage::ConstSharedPtr img_ptr);
 
@@ -97,6 +115,9 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
     const ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg_perc,
     const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg_img,
     cv::Mat &mat);
+     
+  // 旋转度数
+  int RenderGridMap(nav_msgs::msg::OccupancyGrid::ConstSharedPtr grid, cv::Mat& mat, int rotate_degree = 0);
 
   // 获取系统状态
   void GetSystemStatus();

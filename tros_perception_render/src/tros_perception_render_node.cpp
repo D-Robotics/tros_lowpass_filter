@@ -7,12 +7,18 @@ TrosPerceptionRenderNode::TrosPerceptionRenderNode(const rclcpp::NodeOptions &op
   RCLCPP_INFO(this->get_logger(), "TrosPerceptionRenderNode is initializing...");
   perception_topic_name_ = this->declare_parameter("perception_topic_name", perception_topic_name_);
   img_topic_name_ = this->declare_parameter("img_topic_name", img_topic_name_);
+  sub_nav_grid_map_topic_name_ = this->declare_parameter("sub_nav_grid_map_topic_name", sub_nav_grid_map_topic_name_);
+  sub_fusion_grid_map_topic_name_ = this->declare_parameter("sub_fusion_grid_map_topic_name", sub_fusion_grid_map_topic_name_);
   pub_render_topic_name_= this->declare_parameter("pub_render_topic_name", pub_render_topic_name_);
+  pub_render_grid_map_topic_name_ = this->declare_parameter("pub_render_grid_map_topic_name", pub_render_grid_map_topic_name_);
 
   RCLCPP_WARN_STREAM(this->get_logger(),
     "\n perception_topic_name [" << perception_topic_name_ << "]"
     << "\n img_topic_name [" << img_topic_name_ << "]"
+    << "\n sub_nav_grid_map_topic_name [" << sub_nav_grid_map_topic_name_ << "]"
+    << "\n sub_fusion_grid_map_topic_name [" << sub_fusion_grid_map_topic_name_ << "]"
     << "\n pub_render_topic_name [" << pub_render_topic_name_ << "]"
+    << "\n pub_render_grid_map_topic_name [" << pub_render_grid_map_topic_name_ << "]"
   );
 
   system_status_thread_ = std::thread([this](){
@@ -25,16 +31,26 @@ TrosPerceptionRenderNode::TrosPerceptionRenderNode(const rclcpp::NodeOptions &op
   render_img_publisher_ = this->create_publisher<sensor_msgs::msg::CompressedImage>(
     pub_render_topic_name_,
     rclcpp::QoS(10));
+  render_grid_map_publisher_ = this->create_publisher<sensor_msgs::msg::CompressedImage>(
+    pub_render_grid_map_topic_name_,
+    rclcpp::QoS(10));
 
   sub_perc_.subscribe(this, perception_topic_name_);
   sub_img_.subscribe(this, img_topic_name_);
+  perc_synchronizer_ = std::make_shared<message_filters::Synchronizer<PercCustomSyncPolicyType>>(
+    PercCustomSyncPolicyType(10), sub_perc_, sub_img_);
+  perc_synchronizer_->registerCallback(std::bind(&TrosPerceptionRenderNode::PercTopicSyncCallback,
+    this, std::placeholders::_1, std::placeholders::_2));
 
-  synchronizer_ = std::make_shared<SynchronizerType>(CustomSyncPolicyType(10), sub_perc_, sub_img_);
-  synchronizer_->registerCallback(std::bind(&TrosPerceptionRenderNode::TopicSyncCallback,
+  sub_nav_grid_map_.subscribe(this, sub_nav_grid_map_topic_name_);
+  sub_fusion_grid_map_.subscribe(this, sub_fusion_grid_map_topic_name_);
+  grid_map_synchronizer_ = std::make_shared<message_filters::Synchronizer<GridMapCustomSyncPolicyType>>(
+    GridMapCustomSyncPolicyType(10), sub_nav_grid_map_, sub_fusion_grid_map_);
+  grid_map_synchronizer_->registerCallback(std::bind(&TrosPerceptionRenderNode::GridMapTopicSyncCallback,
     this, std::placeholders::_1, std::placeholders::_2));
 }
 
-void TrosPerceptionRenderNode::TopicSyncCallback(
+void TrosPerceptionRenderNode::PercTopicSyncCallback(
   const ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg_perc,
   const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg_img) {
   cv::Mat mat;
@@ -49,6 +65,47 @@ void TrosPerceptionRenderNode::TopicSyncCallback(
   render_img_publisher_->publish(std::move(*msg));
 }  
   
+void TrosPerceptionRenderNode::GridMapTopicSyncCallback(
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_nav_grid_map,
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_fusion_grid_map) {
+  if (!msg_nav_grid_map || !msg_fusion_grid_map || !render_grid_map_publisher_) {
+    return;
+  }
+
+  cv::Mat mat_nav, mat_fusion;
+  if (RenderGridMap(msg_nav_grid_map, mat_nav, 90) == 0 &&
+    RenderGridMap(msg_fusion_grid_map, mat_fusion, 180) == 0) {
+    // 水平拼接两个图像
+    // int h = std::max(mat_nav.rows, mat_fusion.rows);
+    // int w = mat_nav.cols + mat_fusion.cols;
+    // // 创建一个源矩阵  
+    // cv::Mat src = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
+    // RCLCPP_DEBUG(this->get_logger(), "RenderGridMap: w=%d, h=%d", w, h);
+    // // 将源矩阵复制到目标矩阵  
+    // mat_nav.copyTo(src(cv::Rect(0, 0, mat_nav.cols, mat_nav.rows)));  
+    // mat_fusion.copyTo(src(cv::Rect(mat_nav.cols, 0,
+    //   mat_fusion.cols, mat_fusion.rows)));
+
+    // 上下拼接
+    int h = mat_nav.rows + mat_fusion.rows;
+    int w = std::max(mat_nav.cols, mat_fusion.cols);
+    // 创建一个源矩阵  
+    cv::Mat src = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
+    RCLCPP_DEBUG(this->get_logger(), "RenderGridMap: w=%d, h=%d", w, h);
+    // 将源矩阵复制到目标矩阵  
+    mat_nav.copyTo(src(cv::Rect(0, 0, mat_nav.cols, mat_nav.rows)));  
+    mat_fusion.copyTo(src(cv::Rect(0, mat_nav.rows, mat_fusion.cols, mat_fusion.rows)));
+
+    std::vector<uchar> buf;  
+    cv::imencode(".jpeg", src, buf);
+    auto msg = std::make_shared<sensor_msgs::msg::CompressedImage>();  
+    msg->header = msg_nav_grid_map->header;
+    msg->format = "jpeg";  
+    msg->data.assign(buf.begin(), buf.end());  
+    render_grid_map_publisher_->publish(std::move(*msg));
+  }
+}  
+
 cv::Mat TrosPerceptionRenderNode::compressedImageToMat(
   const sensor_msgs::msg::CompressedImage::ConstSharedPtr img_ptr) {  
     try {  
@@ -259,7 +316,104 @@ void TrosPerceptionRenderNode::GetSystemStatus() {
   system_status_->temperature = cpu_temperature;
 }
 
+int TrosPerceptionRenderNode::RenderGridMap(
+  nav_msgs::msg::OccupancyGrid::ConstSharedPtr grid, cv::Mat& mat, int rotate_degree) {
+  if (!grid) {
+    return -1;
+  }
+  /*
+  grid的坐标：
+                  X  cosatmap index
+                  ^  ^
+                  |  |W-1
+                  |  .
+                  |W .
+                  |  .
+                  |  1
+  Y<-------------  0
+          H
+  */
+  // 创建一个 grid->info.height X grid->info.width 尺寸的cv::Mat
+  // 60 X 40
+  mat = cv::Mat(grid->info.width, grid->info.height, CV_8UC3, cv::Scalar(255, 255, 255));
+  RCLCPP_INFO(this->get_logger(),
+    "grid w: %d, h: %d, mat cols: %d, rows: %d", grid->info.width, grid->info.height, mat.cols, mat.rows);
+
+  for (int i=0; i<mat.rows; i++) {
+    for (int j=0; j<mat.cols; j++) {
+      int idx_grid = j * grid->info.width + i;
+      int cost = grid->data[idx_grid];
+
+      cv::Vec3b color(128, 128, 128);
+      // static constexpr int8_t OCC_GRID_UNKNOWN = -1;
+      // static constexpr int8_t OCC_GRID_FREE = 0;
+      // static constexpr int8_t OCC_GRID_OCCUPIED = 100;
+      if (cost == 100) {
+        // OCC_GRID_OCCUPIED
+        color[0] = 0; // B  
+        color[1] = 0; // G  
+        color[2] = 255; // R  
+      } else if (cost == -1) {
+        // OCC_GRID_UNKNOWN
+      } else {
+        // OCC_GRID_FREE
+        color[0] = 255; // B  
+        color[1] = 255; // G  
+        color[2] = 255; // R  
+      }
+
+      mat.at<cv::Vec3b>(i, j) = color;
+    }
+  }
+
+  // 对mat做10倍resize
+  cv::Mat dst;  
+  int newWidth = mat.cols * 10;  
+  int newHeight = mat.rows * 10;  
+  cv::resize(mat, dst, cv::Size(newWidth, newHeight), 0, 0, cv::INTER_LINEAR);
+  
+  if (180 == rotate_degree) {
+    // 使用flip函数进行180度旋转  
+    // 首先沿X轴翻转（水平翻转），然后沿Y轴翻转（垂直翻转）  
+    // 或者直接使用flipCode = -1（同时沿X轴和Y轴翻转）  
+    cv::flip(dst, mat, -1);  
+  } else if (90 == rotate_degree) {
+    // 顺时针旋转90度  
+    cv::Mat img_rotated;  
+    cv::transpose(dst, img_rotated); // 转置  
+    cv::flip(img_rotated, mat, 1); // 绕y轴翻转 
+  }
+
+  // 渲染时间戳
+  std::string timestamp_str = std::to_string(grid->header.stamp.sec) + std::string(".") +
+    std::to_string(grid->header.stamp.nanosec);
+  cv::putText(mat,
+              timestamp_str,
+              cv::Point2f(10, 30),
+              cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
+              1.0,
+              cv::Scalar(0, 255, 0),
+              2.0);  
+              
+  static bool dump = true;
+  if (dump) 
+  {
+    dump = false;
+    std::string saving_path = "render_fusiongrid_" + std::to_string(mat.cols) +
+      "_" + std::to_string(mat.rows) + "_"
+      + std::to_string(grid->header.stamp.sec) + "_"
+      + std::to_string(grid->header.stamp.nanosec)
+      + ".jpeg";
+    RCLCPP_WARN(rclcpp::get_logger("ImageUtils"),
+                "Draw result to file: %s",
+                saving_path.c_str());
+    cv::imwrite(saving_path, mat);
+  }
+  
+  return 0;
 }
+
+} // namespace
 
 #include <rclcpp_components/register_node_macro.hpp>
 RCLCPP_COMPONENTS_REGISTER_NODE(tros::TrosPerceptionRenderNode)
