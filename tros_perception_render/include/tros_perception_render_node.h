@@ -81,7 +81,6 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
   using PercMapCustomSyncPolicyType = message_filters::sync_policies::ExactTime<
     ai_msgs::msg::PerceptionTargets,
     sensor_msgs::msg::CompressedImage,
-    nav_msgs::msg::OccupancyGrid,
     nav_msgs::msg::OccupancyGrid>;
   std::shared_ptr<message_filters::Synchronizer<PercMapCustomSyncPolicyType>>
     perc_map_synchronizer_ = nullptr;
@@ -122,7 +121,6 @@ class TrosPerceptionRenderNode : public rclcpp::Node {
   void PercMapTopicSyncCallback(
     ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg_perc,
     sensor_msgs::msg::CompressedImage::ConstSharedPtr msg_img,
-    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_nav_grid_map,
     nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_fusion_grid_map);
 
   cv::Mat compressedImageToMat(const sensor_msgs::msg::CompressedImage::ConstSharedPtr img_ptr);

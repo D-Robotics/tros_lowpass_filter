@@ -55,9 +55,9 @@ TrosPerceptionRenderNode::TrosPerceptionRenderNode(const rclcpp::NodeOptions &op
     this, std::placeholders::_1, std::placeholders::_2));
 
   perc_map_synchronizer_ = std::make_shared<message_filters::Synchronizer<PercMapCustomSyncPolicyType>>(
-    PercMapCustomSyncPolicyType(10), sub_perc_, sub_img_, sub_nav_grid_map_, sub_fusion_grid_map_);
+    PercMapCustomSyncPolicyType(10), sub_perc_, sub_img_, sub_fusion_grid_map_);
   perc_map_synchronizer_->registerCallback(std::bind(&TrosPerceptionRenderNode::PercMapTopicSyncCallback,
-    this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 }
 
 void TrosPerceptionRenderNode::PercTopicSyncCallback(
@@ -121,10 +121,9 @@ void TrosPerceptionRenderNode::GridMapTopicSyncCallback(
 void TrosPerceptionRenderNode::PercMapTopicSyncCallback(
     ai_msgs::msg::PerceptionTargets::ConstSharedPtr msg_perc,
     sensor_msgs::msg::CompressedImage::ConstSharedPtr msg_img,
-    nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_nav_grid_map,
     nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg_fusion_grid_map) {
-    RCLCPP_INFO(this->get_logger(), "PercMapTopicSync Callback");
-  if (!msg_perc || !msg_img || !msg_nav_grid_map || !msg_fusion_grid_map || !render_perc_map_publisher_) {
+  RCLCPP_INFO(this->get_logger(), "PercMapTopicSync Callback");
+  if (!msg_perc || !msg_img || !msg_fusion_grid_map || !render_perc_map_publisher_) {
     return;
   }
 
@@ -132,35 +131,53 @@ void TrosPerceptionRenderNode::PercMapTopicSyncCallback(
   cv::Mat mat_perc;
   Render(msg_perc, msg_img, mat_perc);
 
-  // 两个map渲染
-  cv::Mat mat_nav, mat_fusion, mat_map;
-  if (RenderGridMap(msg_nav_grid_map, mat_nav, 90) == 0 &&
-    RenderGridMap(msg_fusion_grid_map, mat_fusion, 180) == 0) {
-    // 上下拼接
-    int h = mat_nav.rows + mat_fusion.rows;
-    int w = std::max(mat_nav.cols, mat_fusion.cols);
-    mat_map = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
-    RCLCPP_DEBUG(this->get_logger(), "RenderGridMap: w=%d, h=%d", w, h);
-    // 将源矩阵复制到目标矩阵  
-    mat_nav.copyTo(mat_map(cv::Rect(0, 0, mat_nav.cols, mat_nav.rows)));  
-    mat_fusion.copyTo(mat_map(cv::Rect(0, mat_nav.rows, mat_fusion.cols, mat_fusion.rows)));
+  // map转成的mat
+  cv::Mat mat_map;
+  if (RenderGridMap(msg_fusion_grid_map, mat_map, 180) != 0) {
+    return;
   }
+  // 对mat做 resize
+  float ratio = static_cast<float>(mat_perc.cols) / static_cast<float>(mat_map.cols);
+  int newWidth = static_cast<float>(mat_map.cols) * ratio;  
+  int newHeight = static_cast<float>(mat_map.rows) * ratio;  
+  cv::resize(mat_map, mat_map, cv::Size(newWidth, newHeight), 0, 0, cv::INTER_LINEAR);
+  // 渲染网格，原始grid分辨率为 grid->info.resolution
+  // 10个像素偏移渲染一条线
+  int num_pixels = 10;
+  float map_size = static_cast<float>(num_pixels) * msg_fusion_grid_map->info.resolution;
+  num_pixels = static_cast<float>(num_pixels) * ratio;
+  for (int i=num_pixels; i<mat_map.rows; i+=num_pixels) {
+    // 画横线
+    cv::line(mat_map, cv::Point(0, i), cv::Point(mat_map.cols, i), cv::Scalar(255, 0, 0), 1);
+  }
+  for (int j=num_pixels; j<mat_map.cols; j+=num_pixels) {
+    // 画竖线
+    cv::line(mat_map, cv::Point(j, 0), cv::Point(j, mat_map.rows), cv::Scalar(255, 0, 0), 1);
+  }
+  // 渲染size 信息
+  std::string map_size_info = tools_.FloatToString(map_size) + " meters";
+  cv::putText(mat_map,
+              map_size_info,
+              cv::Point2f(10, 70),
+              cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
+              1.0,
+              cv::Scalar(255, 0, 0),
+              2.0);  
 
-  // 水平拼接 mat_perc mat_map 两个图像
-  int h = std::max(mat_perc.rows, mat_map.rows);
-  int w = mat_perc.cols + mat_map.cols;
-  // 创建一个源矩阵  
-  cv::Mat src = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
-  RCLCPP_DEBUG(this->get_logger(), "RenderGridMap: w=%d, h=%d", w, h);
+  // 拼接后的mat
+  cv::Mat mat_fusion;
+  // 上下拼接
+  int h = mat_perc.rows + mat_map.rows;
+  int w = std::max(mat_perc.cols, mat_map.cols);
+  mat_fusion = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
   // 将源矩阵复制到目标矩阵  
-  mat_perc.copyTo(src(cv::Rect(0, 0, mat_perc.cols, mat_perc.rows)));  
-  mat_map.copyTo(src(cv::Rect(mat_perc.cols, 0,
-    mat_map.cols, mat_map.rows)));
+  mat_perc.copyTo(mat_fusion(cv::Rect(0, 0, mat_perc.cols, mat_perc.rows)));  
+  mat_map.copyTo(mat_fusion(cv::Rect(0, mat_perc.rows, mat_map.cols, mat_map.rows)));
 
   std::vector<uchar> buf;  
-  cv::imencode(".jpeg", src, buf);
+  cv::imencode(".jpeg", mat_fusion, buf);
   auto msg = std::make_shared<sensor_msgs::msg::CompressedImage>();  
-  msg->header = msg_nav_grid_map->header;
+  msg->header = msg_perc->header;
   msg->format = "jpeg";  
   msg->data.assign(buf.begin(), buf.end());
   RCLCPP_INFO(this->get_logger(), "Publish perc map with topic: %s", pub_render_perc_map_topic_name_.data());
@@ -398,7 +415,7 @@ int TrosPerceptionRenderNode::RenderGridMap(
   // 创建一个 grid->info.height X grid->info.width 尺寸的cv::Mat
   // 60 X 40
   mat = cv::Mat(grid->info.width, grid->info.height, CV_8UC3, cv::Scalar(255, 255, 255));
-  RCLCPP_INFO(this->get_logger(),
+  RCLCPP_DEBUG(this->get_logger(),
     "grid w: %d, h: %d, mat cols: %d, rows: %d", grid->info.width, grid->info.height, mat.cols, mat.rows);
 
   for (int i=0; i<mat.rows; i++) {
@@ -428,49 +445,59 @@ int TrosPerceptionRenderNode::RenderGridMap(
     }
   }
 
-  // 对mat做10倍resize
-  cv::Mat dst;  
-  int newWidth = mat.cols * 10;  
-  int newHeight = mat.rows * 10;  
-  cv::resize(mat, dst, cv::Size(newWidth, newHeight), 0, 0, cv::INTER_LINEAR);
+  // // 渲染网格，原始grid分辨率为 grid->info.resolution
+  // // 10个像素偏移渲染一条线
+  // for (int i=10; i<mat.rows; i+=10) {
+  //   // 画横线
+  //   cv::line(mat, cv::Point(0, i), cv::Point(mat.cols, i), cv::Scalar(255, 0, 0), 1);
+  // }
+  // for (int j=10; j<mat.cols; j+=10) {
+  //   // 画竖线
+  //   cv::line(mat, cv::Point(j, 0), cv::Point(j, mat.rows), cv::Scalar(255, 0, 0), 1);
+  // }
+
+  // // 对mat做10倍resize
+  // int newWidth = mat.cols * 10;  
+  // int newHeight = mat.rows * 10;  
+  // cv::resize(mat, mat, cv::Size(newWidth, newHeight), 0, 0, cv::INTER_LINEAR);
   
   if (180 == rotate_degree) {
     // 使用flip函数进行180度旋转  
     // 首先沿X轴翻转（水平翻转），然后沿Y轴翻转（垂直翻转）  
     // 或者直接使用flipCode = -1（同时沿X轴和Y轴翻转）  
-    cv::flip(dst, mat, -1);  
+    cv::flip(mat, mat, -1);  
   } else if (90 == rotate_degree) {
     // 顺时针旋转90度  
     cv::Mat img_rotated;  
-    cv::transpose(dst, img_rotated); // 转置  
+    cv::transpose(mat, img_rotated); // 转置  
     cv::flip(img_rotated, mat, 1); // 绕y轴翻转 
   }
 
-  // 渲染时间戳
-  std::string timestamp_str = std::to_string(grid->header.stamp.sec) + std::string(".") +
-    std::to_string(grid->header.stamp.nanosec);
-  cv::putText(mat,
-              timestamp_str,
-              cv::Point2f(10, 30),
-              cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
-              1.0,
-              cv::Scalar(0, 255, 0),
-              2.0);  
+  // // 渲染时间戳
+  // std::string timestamp_str = std::to_string(grid->header.stamp.sec) + std::string(".") +
+  //   std::to_string(grid->header.stamp.nanosec);
+  // cv::putText(mat,
+  //             timestamp_str,
+  //             cv::Point2f(10, 30),
+  //             cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
+  //             1.0,
+  //             cv::Scalar(0, 255, 0),
+  //             2.0);  
               
-  static bool dump = true;
-  if (dump) 
-  {
-    dump = false;
-    std::string saving_path = "render_fusiongrid_" + std::to_string(mat.cols) +
-      "_" + std::to_string(mat.rows) + "_"
-      + std::to_string(grid->header.stamp.sec) + "_"
-      + std::to_string(grid->header.stamp.nanosec)
-      + ".jpeg";
-    RCLCPP_WARN(rclcpp::get_logger("ImageUtils"),
-                "Draw result to file: %s",
-                saving_path.c_str());
-    cv::imwrite(saving_path, mat);
-  }
+  // static bool dump = true;
+  // if (dump) 
+  // {
+  //   dump = false;
+  //   std::string saving_path = "render_fusiongrid_" + std::to_string(mat.cols) +
+  //     "_" + std::to_string(mat.rows) + "_"
+  //     + std::to_string(grid->header.stamp.sec) + "_"
+  //     + std::to_string(grid->header.stamp.nanosec)
+  //     + ".jpeg";
+  //   RCLCPP_WARN(rclcpp::get_logger("ImageUtils"),
+  //               "Draw result to file: %s",
+  //               saving_path.c_str());
+  //   cv::imwrite(saving_path, mat);
+  // }
   
   return 0;
 }

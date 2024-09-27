@@ -15,6 +15,9 @@ find_package(rclcpp_components REQUIRED)
 find_package(ai_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(OpenCV 4 REQUIRED)
 
 add_library(${PROJECT_NAME}_component SHARED
   src/tros_perception_render_node.cpp)
@@ -32,11 +35,10 @@ ament_target_dependencies(${PROJECT_NAME}_component
   rclcpp
   rclcpp_components
   ai_msgs
+  sensor_msgs
+  nav_msgs
   message_filters
-)
-
-target_link_libraries(${PROJECT_NAME}_component
-  opencv_world
+  OpenCV
 )
 
 install(TARGETS ${PROJECT_NAME}_component
