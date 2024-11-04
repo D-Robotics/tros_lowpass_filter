@@ -37,6 +37,7 @@ class TrosAiMsgFusionNode : public rclcpp::Node {
   std::string srv_topic_manage_topic_name_ = "tros_topic_manage";
    rclcpp::Service<tros_ai_fusion_msgs::srv::TopicManage>::SharedPtr srv_topic_manage_ = nullptr;
 
+  // key is topic name
    using MsgCacheType = std::map<std::string, ai_msgs::msg::PerceptionTargets::SharedPtr>;
   // key is time stamp
    std::map<std::string, MsgCacheType> msg_cache_;

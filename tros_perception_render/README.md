@@ -4,6 +4,8 @@
 
 订阅`ai_msgs::msg::PerceptionTargets`类型的感知结果topic，和`sensor_msgs::msg::CompressedImage`类型的`jpeg`编码图像topic，经过时间对齐后，将感知结果渲染到图像上，并发布渲染后的图像。
 
+TODO (20241010): 完善功能描述
+
 ## 运行
 
 ### 独立进程启动

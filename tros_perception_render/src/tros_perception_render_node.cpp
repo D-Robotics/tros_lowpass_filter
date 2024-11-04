@@ -84,9 +84,9 @@ void TrosPerceptionRenderNode::GridMapTopicSyncCallback(
     return;
   }
 
-  cv::Mat mat_nav, mat_fusion;
-  if (RenderGridMap(msg_nav_grid_map, mat_nav, 90) == 0 &&
-    RenderGridMap(msg_fusion_grid_map, mat_fusion, 180) == 0) {
+  cv::Mat mat_nav, mat_grid;
+  if (RenderGridMap(msg_nav_grid_map, mat_nav, 270) == 0 &&
+    RenderGridMap(msg_fusion_grid_map, mat_grid, 180) == 0) {
     // 水平拼接两个图像
     // int h = std::max(mat_nav.rows, mat_fusion.rows);
     // int w = mat_nav.cols + mat_fusion.cols;
@@ -98,18 +98,43 @@ void TrosPerceptionRenderNode::GridMapTopicSyncCallback(
     // mat_fusion.copyTo(src(cv::Rect(mat_nav.cols, 0,
     //   mat_fusion.cols, mat_fusion.rows)));
 
+    // 对mat做 resize
+    {
+      float ratio = 640.0 / static_cast<float>(mat_nav.cols);
+      int newWidth = static_cast<float>(mat_nav.cols) * ratio;  
+      int newHeight = static_cast<float>(mat_nav.rows) * ratio;  
+      cv::resize(mat_nav, mat_nav, cv::Size(newWidth, newHeight), 0, 0, cv::INTER_LINEAR);
+    }
+    {
+      float ratio = 640.0 / static_cast<float>(mat_grid.cols);
+      int newWidth = static_cast<float>(mat_grid.cols) * ratio;  
+      int newHeight = static_cast<float>(mat_grid.rows) * ratio;  
+      cv::resize(mat_grid, mat_grid, cv::Size(newWidth, newHeight), 0, 0, cv::INTER_LINEAR);
+    }
+    
     // 上下拼接
-    int h = mat_nav.rows + mat_fusion.rows;
-    int w = std::max(mat_nav.cols, mat_fusion.cols);
-    // 创建一个源矩阵  
-    cv::Mat src = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
-    RCLCPP_DEBUG(this->get_logger(), "RenderGridMap: w=%d, h=%d", w, h);
+    int h = mat_nav.rows + mat_grid.rows;
+    int w = std::max(mat_nav.cols, mat_grid.cols);
+    // 拼接后的mat
+    cv::Mat mat_fusion;
+    mat_fusion = cv::Mat(h, w, CV_8UC3, cv::Scalar(255, 255, 255));
     // 将源矩阵复制到目标矩阵  
-    mat_nav.copyTo(src(cv::Rect(0, 0, mat_nav.cols, mat_nav.rows)));  
-    mat_fusion.copyTo(src(cv::Rect(0, mat_nav.rows, mat_fusion.cols, mat_fusion.rows)));
+    mat_nav.copyTo(mat_fusion(cv::Rect(0, 0, mat_nav.cols, mat_nav.rows)));  
+    mat_grid.copyTo(mat_fusion(cv::Rect(0, mat_nav.rows, mat_grid.cols, mat_grid.rows)));
+
+    // 渲染时间戳
+    std::string timestamp_str = std::to_string(msg_nav_grid_map->header.stamp.sec) + std::string(".") +
+      std::to_string(msg_nav_grid_map->header.stamp.nanosec);
+    cv::putText(mat_fusion,
+                timestamp_str,
+                cv::Point2f(10, 30),
+                cv::HersheyFonts::FONT_HERSHEY_SIMPLEX,
+                1.0,
+                cv::Scalar(0, 255, 0),
+                2.0);  
 
     std::vector<uchar> buf;  
-    cv::imencode(".jpeg", src, buf);
+    cv::imencode(".jpeg", mat_fusion, buf);
     auto msg = std::make_shared<sensor_msgs::msg::CompressedImage>();  
     msg->header = msg_nav_grid_map->header;
     msg->format = "jpeg";  
@@ -461,18 +486,31 @@ int TrosPerceptionRenderNode::RenderGridMap(
   // int newHeight = mat.rows * 10;  
   // cv::resize(mat, mat, cv::Size(newWidth, newHeight), 0, 0, cv::INTER_LINEAR);
   
-  if (180 == rotate_degree) {
-    // 使用flip函数进行180度旋转  
-    // 首先沿X轴翻转（水平翻转），然后沿Y轴翻转（垂直翻转）  
-    // 或者直接使用flipCode = -1（同时沿X轴和Y轴翻转）  
-    cv::flip(mat, mat, -1);  
-  } else if (90 == rotate_degree) {
-    // 顺时针旋转90度  
-    cv::Mat img_rotated;  
-    cv::transpose(mat, img_rotated); // 转置  
-    cv::flip(img_rotated, mat, 1); // 绕y轴翻转 
+  // if (180 == rotate_degree) {
+  //   // 使用flip函数进行180度旋转  
+  //   // 首先沿X轴翻转（水平翻转），然后沿Y轴翻转（垂直翻转）  
+  //   // 或者直接使用flipCode = -1（同时沿X轴和Y轴翻转）  
+  //   cv::flip(mat, mat, -1);  
+  // } else if (90 == rotate_degree) {
+  //   // 顺时针旋转90度  
+  //   cv::Mat img_rotated;  
+  //   cv::transpose(mat, img_rotated); // 转置  
+  //   cv::flip(img_rotated, mat, 1); // 绕y轴翻转 
+  // } else if (-90 == rotate_degree) {
+  //   // 逆时针旋转90度
+  //   cv::rotate(mat, mat, cv::ROTATE_90_CLOCKWISE);
+  // }
+  
+  // cv::ROTATE_90_CLOCKWISE：逆时针旋转90度。
+  // cv::ROTATE_180：旋转180度。
+  // cv::ROTATE_90_COUNTERCLOCKWISE：顺时针旋转90度。
+  if (90 == rotate_degree) {
+    cv::rotate(mat, mat, cv::ROTATE_90_COUNTERCLOCKWISE);
+  } else if (180 == rotate_degree) {
+    cv::rotate(mat, mat, cv::ROTATE_180);
+  } else if (270 == rotate_degree) {
+    cv::rotate(mat, mat, cv::ROTATE_90_CLOCKWISE);
   }
-
   // // 渲染时间戳
   // std::string timestamp_str = std::to_string(grid->header.stamp.sec) + std::string(".") +
   //   std::to_string(grid->header.stamp.nanosec);
