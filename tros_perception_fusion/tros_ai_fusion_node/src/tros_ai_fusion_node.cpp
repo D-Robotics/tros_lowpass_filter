@@ -263,16 +263,16 @@ void TrosAiMsgFusionNode::FusionMsg(MsgCacheType msg_cache) {
   }
 
   // clear target and roi types
-  for (auto & target : pub_ai_msg->targets) {
-    if (target.type == "parking_space") {
-      // web会根据 target type 判断是否是分割
-      continue;
-    }
-    target.type = "";
-    for (auto & roi : target.rois) {
-      roi.type = "";
-    }
-  }
+  // for (auto & target : pub_ai_msg->targets) {
+  //   if (target.type == "parking_space") {
+  //     // web会根据 target type 判断是否是分割
+  //     continue;
+  //   }
+  //   target.type = "";
+  //   for (auto & roi : target.rois) {
+  //     roi.type = "";
+  //   }
+  // }
   
   ai_msg_publisher_->publish(std::move(*pub_ai_msg));
 }
