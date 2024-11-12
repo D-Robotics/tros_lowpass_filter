@@ -23,7 +23,7 @@ TrosAiMsgFusionNode::TrosAiMsgFusionNode(const rclcpp::NodeOptions &options) :
   this->get_parameter("topic_names_fusion", fusion_topic_names_);
   fusion_topic_name_base_ = this->declare_parameter("topic_name_base", fusion_topic_name_base_);
   pub_fusion_topic_name_= this->declare_parameter("pub_fusion_topic_name", pub_fusion_topic_name_);
-  filter_duplicated_roi_ = this->declare_parameter("filter_duplicated_roi", filter_duplicated_roi_);
+  enable_filter_ = this->declare_parameter("enable_filter", enable_filter_);
 
   std::stringstream ss;
   for (const auto &topic_name : fusion_topic_names_) {
@@ -33,7 +33,7 @@ TrosAiMsgFusionNode::TrosAiMsgFusionNode(const rclcpp::NodeOptions &options) :
     "\n topic_name_base [" << fusion_topic_name_base_ << "]"
     << "\n topic_names_fusion: " << ss.str()
     << "\n pub_fusion_topic_name [" << pub_fusion_topic_name_ << "]"
-    << "\n filter_duplicated_roi [" << filter_duplicated_roi_ << "]"
+    << "\n enable_filter [" << enable_filter_ << "]"
     << "\n srv_topic_manage_topic_name [" << srv_topic_manage_topic_name_
       << "], you can do action [" << tros_ai_fusion_msgs::srv::TopicManage::Request::ADD
       << "|" << tros_ai_fusion_msgs::srv::TopicManage::Request::DELETE
@@ -264,53 +264,75 @@ void TrosAiMsgFusionNode::FusionMsg(MsgCacheType msg_cache) {
     }
   }
 
-  if (filter_duplicated_roi_) {
-    std::vector<ai_msgs::msg::Target> multi_roi_targets;
+  if (enable_filter_) {
+    std::set<std::string> keys;
     std::map<std::string, ai_msgs::msg::Target> map_targets;
-    // 根据 target type 和 track_id 以及 roi type 和 rect，合并target的roi和attribute
     for (auto & target : pub_ai_msg->targets) {
-      if (target.rois.size() != 1) {
-        multi_roi_targets.push_back(target);
-        continue;
-      }
-      
-      const auto& new_roi = target.rois.at(0);
-      const auto& new_rect = new_roi.rect;
-      std::stringstream ss;
-      ss << target.type + " " << target.track_id << " " << new_roi.type
-        << " " << new_rect.x_offset << " " << new_rect.y_offset << " " << new_rect.width << " " << new_rect.height;
-      std::string key = ss.str();
-      if (map_targets.find(key) == map_targets.end()) {
-        map_targets[key] = target;
+      if (target.rois.empty()) continue;
+
+      std::string target_key = target.type + std::to_string(target.track_id) + target.rois.front().type;
+      if (map_targets.find(target_key) == map_targets.end()) {
+        map_targets[target_key] = target;
+
+        for (const auto& roi : target.rois) {
+          std::string roi_key = target_key;
+          if (keys.find(roi_key) == keys.end()) {
+            keys.insert(roi_key);
+          }
+        }
+        for (const auto& attr : target.attributes) {
+          std::string attr_key = target_key + attr.type + std::to_string(attr.value);
+          if (keys.find(attr_key) == keys.end()) {
+            keys.insert(attr_key);
+          }
+        }
+        for (const auto& point : target.points) {
+          std::string kps_key = target_key + point.type;
+          if (keys.find(kps_key) == keys.end()) {
+            keys.insert(kps_key);
+          }
+        }
+
         continue;
       } else {
-        auto base_roi = map_targets[key].rois[0];
-        const auto& base_rect = base_roi.rect;
-        if (base_roi.type == new_roi.type && base_rect.x_offset == new_rect.x_offset &&
-        base_rect.y_offset == new_rect.y_offset &&
-        base_rect.width == new_rect.width &&
-        base_rect.height == new_rect.height) {
-          // 相同的roi，合并attribute等
-          for (const auto& attribute : target.attributes) {
-            map_targets[key].attributes.push_back(attribute);
+        for (const auto& roi : target.rois) {
+          std::string roi_key = target_key;
+          if (keys.find(roi_key) == keys.end()) {
+            keys.insert(roi_key);
+            map_targets[target_key].rois.push_back(roi);
+          } else {
+            continue;
           }
-          for (const auto& point : target.points) {
-            map_targets[key].points.push_back(point);
+        }
+
+        for (const auto& attr : target.attributes) {
+          std::string attr_key = target_key + attr.type;
+          if (keys.find(attr_key) == keys.end()) {
+            keys.insert(attr_key);
+            map_targets[target_key].attributes.push_back(attr);
+          } else {
+            continue;
           }
-          for (const auto& capture : target.captures) {
-            map_targets[key].captures.push_back(capture);
+        }
+
+        for (const auto& point : target.points) {
+          std::string kps_key = target_key + point.type;
+          if (keys.find(kps_key) == keys.end()) {
+            keys.insert(kps_key);
+            map_targets[target_key].points.push_back(point);
+          } else {
+            continue;
           }
-        } else {
-          multi_roi_targets.push_back(target);
+        }
+
+        for (const auto& capture : target.captures) {
+          map_targets[target_key].captures.push_back(capture);
         }
       }
     }
     pub_ai_msg->targets.clear();
     for (const auto& map_target : map_targets) {
       pub_ai_msg->targets.push_back(map_target.second);
-    }
-    for (const auto& multi_roi_target : multi_roi_targets) {
-      pub_ai_msg->targets.push_back(multi_roi_target);
     }
   }
   

@@ -75,8 +75,8 @@ class TrosAiMsgFusionNode : public rclcpp::Node {
    std::vector<std::string> RegisterSynchronizer(
     const std::vector<std::string>& topic_names);
 
-  // 融合方法，false: 直接拷贝所有成员；true: 根据内容融合，过滤相同的roi
-  bool filter_duplicated_roi_ = true;
+  // 融合方法，false: 直接拷贝所有成员；true: 根据内容融合，过滤相同的roi, kps
+  bool enable_filter_ = true;
 };
 
 }
