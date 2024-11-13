@@ -10,7 +10,7 @@
 
   "face_kps": {
     "dcutoff": 1.0,
-    "beta": 0.1,
+    "beta": 0.2,
     "mincutoff": 0.01,
     "freq":  120
   },
