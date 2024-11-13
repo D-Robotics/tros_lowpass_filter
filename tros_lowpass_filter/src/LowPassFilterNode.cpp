@@ -21,60 +21,124 @@
 #include <map>
 #include <set>
 #include <utility>
+#include <fstream>
+#include "rapidjson/document.h"
+#include "rapidjson/istreamwrapper.h"
+#include "rapidjson/writer.h"
 
 namespace tros {
 
+int LowPassFilterNode::ParseFromFile(std::string config_file) {
+  if (config_file.empty()) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "Config file [%s] is empty!",
+                 config_file.data());
+    return -1;
+  }
+  // Parsing config
+  std::ifstream ifs(config_file.c_str());
+  if (!ifs) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "Read config file [%s] fail!",
+                 config_file.data());
+    return -1;
+  }
+  rapidjson::IStreamWrapper isw(ifs);
+  rapidjson::Document document;
+  document.ParseStream(isw);
+  if (document.HasParseError()) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "Parsing config file %s failed, maybe the format of contens is error",
+                 config_file.data());
+    return -1;
+  }
+
+  std::vector<std::string> types;
+  if (document.HasMember("types")) {
+    for(size_t i = 0; i < document["types"].Size(); i++){
+      types.push_back(document["types"][i].GetString());
+    }
+  }
+
+  {
+    std::stringstream ss;
+    ss << "types size is " << types.size() << ",";
+    for (const auto& type: types) {
+      ss << " " << type;
+    }
+    RCLCPP_WARN(this->get_logger(), "%s", ss.str().data());
+  }
+
+  for (const auto& type: types) {
+    if (!document.HasMember(type.data())) {
+      RCLCPP_ERROR(this->get_logger(), "type %s is not existed in config", type.data());
+      return -1;
+    }
+
+    FilterParam filter_param;
+
+    if (document[type.data()].HasMember("dcutoff")) {
+      filter_param.dcutoff_ = document[type.data()]["dcutoff"].GetFloat();
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "type %s has no config of dcutoff", type.data());
+      return -1;
+    }
+    
+    if (document[type.data()].HasMember("beta")) {
+      filter_param.beta_ = document[type.data()]["beta"].GetFloat();
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "type %s has no config of beta", type.data());
+      return -1;
+    }
+    
+    if (document[type.data()].HasMember("mincutoff")) {
+      filter_param.mincutoff_ = document[type.data()]["mincutoff"].GetFloat();
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "type %s has no config of mincutoff", type.data());
+      return -1;
+    }
+
+    if (document[type.data()].HasMember("freq")) {
+      filter_param.freq_ = document[type.data()]["freq"].GetFloat();
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "type %s has no config of freq", type.data());
+      return -1;
+    }
+
+    map_filter_params_[type] = filter_param;
+  }
+  
+  {
+    std::stringstream ss;
+    for (const auto& map_filter_param : map_filter_params_) {
+      ss << "\n type: " << map_filter_param.first << ", "
+        << "\t dcutoff: " << map_filter_param.second.dcutoff_
+        << ", beta: " << map_filter_param.second.beta_
+        << ", mincutoff: " << map_filter_param.second.mincutoff_
+        << ", freq: " << map_filter_param.second.freq_;
+    }
+    RCLCPP_WARN(this->get_logger(), "%s\n", ss.str().data());
+  }
+
+  return 0;
+} 
+
 LowPassFilterNode::LowPassFilterNode(const rclcpp::NodeOptions & node_options,
   std::string node_name) : rclcpp::Node(node_name, node_options) {
+
   perc_sub_topic_ = this->declare_parameter("perc_sub_topic", perc_sub_topic_);
   perc_pub_topic_ = this->declare_parameter("perc_pub_topic", perc_pub_topic_);
+  config_file_ = this->declare_parameter("config_file", config_file_);
 
   RCLCPP_WARN_STREAM(this->get_logger(),
     "\n perc_sub_topic: " << perc_sub_topic_
-    << "\n perc_pub_topic: " << perc_pub_topic_);
+    << "\n perc_pub_topic: " << perc_pub_topic_
+    << "\n config_file: " << config_file_
+  );
 
-  {
-    // face/face_kps
-    std::string key = "face";
-    double dcutoff = 1.0;
-    double beta = 0.02;
-    double mincutoff = 0.01;
-    double freq = 120;
-    map_filter_params_[key] = std::make_shared<FilterParam>(freq, mincutoff, beta, dcutoff);
-    key = "face_kps";
-    beta = 0.1;
-    map_filter_params_[key] = std::make_shared<FilterParam>(freq, mincutoff, beta, dcutoff);
-  }
-  {
-    // hand/hand_kps
-    std::string key = "hand";
-    double dcutoff = 1.0;
-    double beta = 0.1;
-    double mincutoff = 0.01;
-    double freq = 120;
-    map_filter_params_[key] = std::make_shared<FilterParam>(freq, mincutoff, beta, dcutoff);
-    key = "hand_kps";
-    map_filter_params_[key] = std::make_shared<FilterParam>(freq, mincutoff, beta, dcutoff);
-  }
-  {
-    // head
-    std::string key = "head";
-    double dcutoff = 1.0;
-    double beta= 0.1;
-    double mincutoff = 0.01;
-    double freq = 120;
-    map_filter_params_[key] = std::make_shared<FilterParam>(freq, mincutoff, beta, dcutoff);
-  }
-  {
-    // body/body_kps
-    std::string key = "body";
-    double dcutoff = 1.0;
-    double beta= 0.02;
-    double mincutoff = 0.01;
-    double freq = 120;
-    map_filter_params_[key] = std::make_shared<FilterParam>(freq, mincutoff, beta, dcutoff);
-    key = "body_kps";
-    map_filter_params_[key] = std::make_shared<FilterParam>(freq, mincutoff, beta, dcutoff);
+  if (ParseFromFile(config_file_) != 0) {
+    rclcpp::shutdown();
+    return;
   }
 
   perc_sub_ = this->create_subscription<ai_msgs::msg::PerceptionTargets>(
@@ -113,7 +177,7 @@ ai_msgs::msg::PerceptionTargets::SharedPtr LowPassFilterNode::DoProcess(
 
   auto find_filter = [this](std::string type)->std::shared_ptr<pair_filter>{
     if (map_filter_params_.find(type) != map_filter_params_.end()) {
-      return std::make_shared<pair_filter>(*map_filter_params_[type]);
+      return std::make_shared<pair_filter>(map_filter_params_[type]);
     } else {
       return std::make_shared<pair_filter>(filter_default_param_);
     }

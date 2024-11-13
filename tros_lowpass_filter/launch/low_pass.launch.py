@@ -33,20 +33,27 @@ def generate_launch_description():
         'lowpass_perc_pub_topic',
         default_value='/tros_perc_render',
         description='lowpass published msg topic')
+    declare_config_file_arg = DeclareLaunchArgument(
+        'config_file',
+        default_value=os.path.join(get_package_share_directory('tros_lowpass_filter'), 'params', 'low_pass.json'),
+        description='Full path to the ROS2 parameters file to use for all low-pass filters')
 
     tros_lowpass_filter_node = Node(
-       package='tros_lowpass_filter',
-       executable='tros_lowpass_filter',
-       name='tros_lowpass_filter_node',
-       parameters=[
-                    {'perc_sub_topic': 'tros_perc_fusion'},
-                    {'perc_pub_topic': 'tros_perc_render'},
-       ]
+        package='tros_lowpass_filter',
+        executable='tros_lowpass_filter',
+        name='tros_lowpass_filter_node',
+        parameters=[
+            {'perc_sub_topic': LaunchConfiguration('lowpass_perc_sub_topic')},
+            {'perc_pub_topic': LaunchConfiguration('lowpass_perc_pub_topic')},
+            {'config_file': LaunchConfiguration('config_file')}
+        ],
+        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')]
     )
 
     ld = LaunchDescription()
+    ld.add_action(log_level_arg)
     ld.add_action(perc_sub_topic_arg)
     ld.add_action(perc_pub_topic_arg)
-    ld.add_action(log_level_arg)
+    ld.add_action(declare_config_file_arg)
     ld.add_action(tros_lowpass_filter_node)
     return ld

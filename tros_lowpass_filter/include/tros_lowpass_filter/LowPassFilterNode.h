@@ -30,6 +30,7 @@
 namespace tros {
 
 struct FilterParam {
+  FilterParam() {}
   FilterParam(double freq, double mincutoff, double beta, double dcutoff) :
     freq_(freq), mincutoff_(mincutoff), beta_(beta), dcutoff_(dcutoff) {
   }
@@ -81,13 +82,17 @@ class LowPassFilterNode : public rclcpp::Node {
 
   double freq_ = 120.0;
   // std::map<std::string, std::shared_ptr<pair_filter>> map_filters_;
-  std::map<std::string, std::shared_ptr<FilterParam>> map_filter_params_;
+  std::map<std::string, FilterParam> map_filter_params_;
   FilterParam filter_default_param_ = FilterParam(120.0, 0.01, 0.1, 1.0);
+
+  std::string config_file_ = "";
 
   std::string perc_sub_topic_ = "tros_perc";
   rclcpp::Subscription<ai_msgs::msg::PerceptionTargets>::SharedPtr perc_sub_ = nullptr; 
   std::string perc_pub_topic_ = "tros_perc_lowpass_filtered";
   rclcpp::Publisher<ai_msgs::msg::PerceptionTargets>::SharedPtr perc_pub_ = nullptr;
+
+  int ParseFromFile(std::string config_file);
 
   void perception_callback(ai_msgs::msg::PerceptionTargets::SharedPtr msg);
 
