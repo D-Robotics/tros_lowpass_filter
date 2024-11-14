@@ -223,7 +223,10 @@ void TrosAiMsgFusionNode::TopicSyncCallback(
     }
     ss << fusion_topic_name_base_ << "]";
 
-    RCLCPP_WARN_STREAM(this->get_logger(),
+    RCLCPP_INFO_STREAM(this->get_logger(),
+      ss.str()
+      );
+    RCLCPP_INFO_STREAM_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
       ss.str()
       );
     
@@ -275,6 +278,7 @@ void TrosAiMsgFusionNode::FusionMsg(MsgCacheType msg_cache) {
         map_targets[target_key] = target;
 
         for (const auto& roi : target.rois) {
+          // 默认一个target只有一个roi
           std::string roi_key = target_key;
           if (keys.find(roi_key) == keys.end()) {
             keys.insert(roi_key);
