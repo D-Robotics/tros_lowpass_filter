@@ -159,6 +159,32 @@ void LowPassFilterNode::perception_callback(
     "in targets size: %ld, out targets size: %ld",
     msg->targets.size(), new_msg->targets.size());
   if (new_msg && perc_pub_) {
+    
+    {
+      std::unique_lock<std::mutex> lk(frame_stat_mtx_);
+      if (!output_tp_) {
+        output_tp_ =
+            std::make_shared<std::chrono::high_resolution_clock::time_point>();
+        *output_tp_ = std::chrono::system_clock::now();
+      }
+      auto tp_now = std::chrono::system_clock::now();
+      output_frameCount_++;
+      auto interval = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          tp_now - *output_tp_)
+                          .count();
+      if (interval >= 5000) {
+        float out_fps = static_cast<float>(output_frameCount_) /
+                        (static_cast<float>(interval) / 1000.0);
+        RCLCPP_WARN(this->get_logger(),
+                    "Pub topic %s fps %.2f",
+                    perc_pub_topic_.data(), out_fps);
+
+        smart_fps_ = round(out_fps);
+        output_frameCount_ = 0;
+        *output_tp_ = std::chrono::system_clock::now();
+      }
+    }
+    
     perc_pub_->publish(std::move(*new_msg));
   }
 }

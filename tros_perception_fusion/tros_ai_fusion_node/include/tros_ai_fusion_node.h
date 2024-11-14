@@ -58,6 +58,12 @@ class TrosAiMsgFusionNode : public rclcpp::Node {
    std::mutex sync_msgs_cache_mutex_;
    size_t sync_msgs_cache_max_size_ = 10;
 
+  std::shared_ptr<std::chrono::high_resolution_clock::time_point> output_tp_ =
+      nullptr;
+  int output_frameCount_ = 0;
+  int smart_fps_ = -1;
+  std::mutex frame_stat_mtx_;
+
   std::string pub_fusion_topic_name_ = "fusion_ai_msg";
   rclcpp::Publisher<ai_msgs::msg::PerceptionTargets>::SharedPtr ai_msg_publisher_ = nullptr;
 
