@@ -226,7 +226,7 @@ void TrosAiMsgFusionNode::TopicSyncCallback(
     RCLCPP_INFO_STREAM(this->get_logger(),
       ss.str()
       );
-    RCLCPP_INFO_STREAM_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+    RCLCPP_WARN_STREAM_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
       ss.str()
       );
     
