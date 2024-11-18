@@ -1,8 +1,8 @@
-# tros_perception_fusion
+[English](./README.md) | 简体中文
 
 ## 功能描述
 
-订阅多个`ai_msgs::msg::PerceptionTargets`类型的topic，经过时间对齐后，将多个目标合并为一个目标发布。
+订阅多个[hobot_msgs/ai_msgs/msg/PerceptionTargets](https://github.com/D-Robotics/hobot_msgs/blob/develop/ai_msgs/msg/PerceptionTargets.msg)类型的topic，经过时间对齐后，将多个目标合并为一个目标发布。
 
 支持使用service接口动态修改用于融合的topic。
 

@@ -87,9 +87,9 @@ class LowPassFilterNode : public rclcpp::Node {
 
   std::string config_file_ = "";
 
-  std::string perc_sub_topic_ = "tros_perc";
+  std::string perc_sub_topic_ = "tros_perc_render";
   rclcpp::Subscription<ai_msgs::msg::PerceptionTargets>::SharedPtr perc_sub_ = nullptr; 
-  std::string perc_pub_topic_ = "tros_perc_lowpass_filtered";
+  std::string perc_pub_topic_ = "tros_perc_fusion";
   rclcpp::Publisher<ai_msgs::msg::PerceptionTargets>::SharedPtr perc_pub_ = nullptr;
 
   std::shared_ptr<std::chrono::high_resolution_clock::time_point> output_tp_ =
